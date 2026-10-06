@@ -4,6 +4,7 @@
 let cachedCourses = null;
 let cachedTimeSlots = null;
 let cachedCourseConfig = null;
+let cachedComboSchedule = null;
 
 // 合并下载
 function tryMergeAndExport() {
@@ -12,13 +13,14 @@ function tryMergeAndExport() {
     const exportData = {
         courses: cachedCourses,
         timeSlots: cachedTimeSlots,
-        config: cachedCourseConfig
+        config: cachedCourseConfig,
+        comboSchedule: cachedComboSchedule
     };
     // 强制转换为 JSON 字符串
     const exportJsonString = JSON.stringify(exportData, null, 2); 
 
-    if (cachedCourses === null && cachedTimeSlots === null && cachedCourseConfig === null) {
-        console.warn("注意：脚本完成时课程、时间段和配置数据都为空 (null)，将下载空文件。");
+    if (cachedCourses === null && cachedTimeSlots === null && cachedCourseConfig === null && cachedComboSchedule === null) {
+        console.warn("注意：脚本完成时课程、时间段、配置和组合作息数据都为空 (null)，将下载空文件。");
     }
 
     const dataUrl = 'data:application/json;charset=utf-8,' + encodeURIComponent(exportJsonString);
@@ -32,6 +34,7 @@ function tryMergeAndExport() {
         cachedCourses = null;
         cachedTimeSlots = null;
         cachedCourseConfig = null;
+        cachedComboSchedule = null;
         if (downloadId) {
             console.log(`合并下载已启动，ID: ${downloadId}`);
         } else {
@@ -131,7 +134,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 sendResponse({ success: true });
                 return true;
 
-            case 'saveCourseConfig': // [新增] 处理 saveCourseConfig
+            case 'saveCourseConfig':
                 const configJsonString = args[0];
                 const configPromiseId = args[1];
 
@@ -161,7 +164,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 
                 sendResponse({ success: true });
                 return true;
-                
+
+            case 'saveComboSchedule':
+                const comboScheduleJsonString = args[0];
+                const comboPromiseId = args[1];
+
+                try {
+                    cachedComboSchedule = JSON.parse(comboScheduleJsonString);
+                    console.log("组合作息方案已缓存。等待 'notifyTaskCompletion' 触发下载。");
+
+                    chrome.tabs.sendMessage(tabId, {
+                        type: 'RESOLVE_PROMISE_IN_PAGE',
+                        messageId: comboPromiseId,
+                        value: true,
+                        isError: false
+                    });
+                } catch (e) {
+                    console.error("解析组合作息方案时出错:", e);
+                    chrome.tabs.sendMessage(tabId, {
+                        type: 'RESOLVE_PROMISE_IN_PAGE',
+                        messageId: comboPromiseId,
+                        value: `组合作息方案导入失败: ${e.message}`,
+                        isError: true
+                    });
+                }
+
+                sendResponse({ success: true });
+                return true;
+
             case 'notifyTaskCompletion':
                 console.log("接收到 notifyTaskCompletion 信号，触发数据导出。");
                 tryMergeAndExport(); // 此时触发下载

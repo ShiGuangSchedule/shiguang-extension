@@ -8,6 +8,10 @@ function generatePromiseId() {
 // 待处理 Promise 存储
 const pendingPromises = new Map();
 
+let presetTimeSlotsCache = null;
+
+let isComboScheduleImported = false;
+
 // shiguangBridge 同步方法模拟
 window.shiguangBridge = {
     showToast: (message) => {
@@ -17,12 +21,17 @@ window.shiguangBridge = {
     // 统一的收尾信号
     notifyTaskCompletion: () => {
         console.log('[模拟Completion]: 收到任务完成通知');
+        presetTimeSlotsCache = null;
+        isComboScheduleImported = false;
         window.postMessage({ type: 'ANDROID_BRIDGE_CALL', method: 'notifyTaskCompletion', args: [] }, window.location.origin);
     }
 };
 
 // 严格的 HH:mm 正则表达式：小时 00-23，分钟 00-59
 const TIME_REGEX = /^(0[0-9]|1[0-9]|2[0-3]):[0-5][0-9]$/;
+
+// 严格的 YYYY-MM-DD 正则表达式
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * 辅助函数：将 "HH:mm" 格式的字符串转换为自午夜以来的分钟数。
@@ -206,6 +215,156 @@ function validateCourseConfigData(jsonString) {
     return JSON.stringify(cleanedConfig);
 }
 
+/**
+ * 验证组合作息方案的数据结构。
+ * 校验逻辑对齐文档《适配脚本开发指南 v2》1.4 节与《一些数据的格式信息.md》第四节。
+ *
+ * @param {object} combo 组合作息方案对象
+ * @returns {string|null} 验证失败返回错误消息，否则返回 null
+ */
+function validateComboScheduleData(combo) {
+    if (typeof combo !== 'object' || combo === null) {
+        return "组合作息方案不是一个有效的 JSON 对象。";
+    }
+    if (!Array.isArray(combo.publicSchedules) || combo.publicSchedules.length === 0) {
+        return "publicSchedules 必须是非空数组。";
+    }
+
+    for (const tpl of combo.publicSchedules) {
+        if (!tpl || typeof tpl !== 'object') {
+            return "公共作息模板必须是一个对象。";
+        }
+        if (!tpl.name || typeof tpl.name !== 'string' || tpl.name.trim() === '') {
+            return "公共作息模板缺少 name 字段。";
+        }
+        if (!tpl.startDate || !tpl.endDate) {
+            return `模板 ${tpl.name} 缺少 startDate 或 endDate。`;
+        }
+        if (!DATE_REGEX.test(tpl.startDate) || !DATE_REGEX.test(tpl.endDate)) {
+            return `模板 ${tpl.name} 的日期格式错误，应为 YYYY-MM-DD。`;
+        }
+        if (!Array.isArray(tpl.timeSlots)) {
+            return `模板 ${tpl.name} 的 timeSlots 必须是数组。`;
+        }
+        for (const slot of tpl.timeSlots) {
+            if (!slot || typeof slot !== 'object') {
+                return `模板 ${tpl.name} 中的节次必须是一个对象。`;
+            }
+            if (typeof slot.number !== 'number') {
+                return `模板 ${tpl.name} 中的节次缺少 number 字段。`;
+            }
+            if (!slot.startTime || !slot.endTime) {
+                return `模板 ${tpl.name} 的节次 ${slot.number} 缺少时间。`;
+            }
+            const sm = parseTimeToMinutes(slot.startTime);
+            const em = parseTimeToMinutes(slot.endTime);
+            if (sm === -1 || em === -1) {
+                return `模板 ${tpl.name} 的节次 ${slot.number} 时间格式错误。`;
+            }
+            if (sm >= em) {
+                return `模板 ${tpl.name} 的节次 ${slot.number} 开始时间必须早于结束时间。`;
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * 差量合并：以基础时间段为骨架，对本模板的 timeSlots 做对齐。
+ *
+ * 规则（对齐文档 1.4 节「差量合并机制」）：
+ * - 骨架中已有的 number：用模板提供的 startTime / endTime 覆盖；
+ * - 骨架中缺失的 number：用骨架补齐；
+ * - 模板中多出的 number：自动丢弃；
+ * - 合并后 alias 统一置为 null（本地无 alias 概念，此处不写入）。
+ *
+ * @param {Array} baseSlots 基础时间段骨架（已按 number 升序）
+ * @param {Array} draftSlots 模板提供的草稿时间段
+ * @returns {Array} 合并后的时间段数组
+ */
+function mergeAndAlignTimeSlots(baseSlots, draftSlots) {
+    const draftMap = new Map();
+    for (const slot of draftSlots) {
+        draftMap.set(slot.number, slot);
+    }
+    return baseSlots.map(base => {
+        const override = draftMap.get(base.number);
+        if (override) {
+            return {
+                number: base.number,
+                startTime: override.startTime,
+                endTime: override.endTime
+            };
+        }
+        return {
+            number: base.number,
+            startTime: base.startTime,
+            endTime: base.endTime
+        };
+    });
+}
+
+/**
+ * 清洗课程对象：只保留文档定义的字段。
+ * 丢弃的字段：color、remark 及任何未定义字段。
+ * 对齐 Native 侧的 ignoreUnknownKeys 行为。
+ *
+ * @param {object} course 原始课程对象
+ * @returns {object} 清洗后的课程对象
+ */
+function cleanCourseData(course) {
+    const cleaned = {};
+    if (course.name !== undefined) cleaned.name = course.name;
+    if (course.teacher !== undefined) cleaned.teacher = course.teacher;
+    if (course.position !== undefined) cleaned.position = course.position;
+    if (course.day !== undefined) cleaned.day = course.day;
+    if (course.startSection !== undefined) cleaned.startSection = course.startSection;
+    if (course.endSection !== undefined) cleaned.endSection = course.endSection;
+    if (course.weeks !== undefined) cleaned.weeks = course.weeks;
+    if (course.isCustomTime !== undefined) cleaned.isCustomTime = course.isCustomTime;
+    if (course.customStartTime !== undefined) cleaned.customStartTime = course.customStartTime;
+    if (course.customEndTime !== undefined) cleaned.customEndTime = course.customEndTime;
+    if (course.credit !== undefined) cleaned.credit = course.credit;
+    return cleaned;
+}
+
+/**
+ * 清洗时间段对象：只保留 number、startTime、endTime。
+ * 丢弃的字段：alias 及任何未定义字段。
+ *
+ * @param {object} slot 原始时间段对象
+ * @returns {object} 清洗后的时间段对象
+ */
+function cleanTimeSlotData(slot) {
+    const cleaned = {};
+    if (slot.number !== undefined) cleaned.number = slot.number;
+    if (slot.startTime !== undefined) cleaned.startTime = slot.startTime;
+    if (slot.endTime !== undefined) cleaned.endTime = slot.endTime;
+    return cleaned;
+}
+
+/**
+ * 清洗组合作息方案：顶层只保留 name、publicSchedules；
+ * 模板只保留 name、startDate、endDate、defaultClassDuration、defaultBreakDuration、timeSlots。
+ *
+ * @param {object} combo 原始组合作息方案对象
+ * @returns {object} 清洗后的组合作息方案对象
+ */
+function cleanComboScheduleData(combo) {
+    const cleaned = {};
+    if (combo.name !== undefined) cleaned.name = combo.name;
+    cleaned.publicSchedules = (combo.publicSchedules || []).map(tpl => {
+        const t = {};
+        if (tpl.name !== undefined) t.name = tpl.name;
+        if (tpl.startDate !== undefined) t.startDate = tpl.startDate;
+        if (tpl.endDate !== undefined) t.endDate = tpl.endDate;
+        if (tpl.defaultClassDuration !== undefined) t.defaultClassDuration = tpl.defaultClassDuration;
+        if (tpl.defaultBreakDuration !== undefined) t.defaultBreakDuration = tpl.defaultBreakDuration;
+        t.timeSlots = (tpl.timeSlots || []).map(cleanTimeSlotData);
+        return t;
+    });
+    return cleaned;
+}
 
 // shiguangBridgePromise 异步方法模拟
 window.shiguangBridgePromise = {
@@ -256,6 +415,8 @@ window.shiguangBridgePromise = {
             const promiseId = generatePromiseId();
             pendingPromises.set(promiseId, { resolve, reject });
             console.log('[模拟SaveImportedCourses]:', { jsonString });
+
+            let cleanedCourses;
             try {
                 const courses = JSON.parse(jsonString);
                 if (!Array.isArray(courses)) {
@@ -267,6 +428,8 @@ window.shiguangBridgePromise = {
                         throw new Error(`课程数据验证失败: ${validationError}`);
                     }
                 }
+                // 校验通过后清洗：只保留文档定义的字段
+                cleanedCourses = courses.map(cleanCourseData);
             } catch (e) {
                 console.error('[数据验证失败]:', e.message);
                 pendingPromises.delete(promiseId);
@@ -276,7 +439,7 @@ window.shiguangBridgePromise = {
             window.postMessage({
                 type: 'ANDROID_BRIDGE_CALL',
                 method: 'saveImportedCourses',
-                args: [jsonString, promiseId],
+                args: [JSON.stringify(cleanedCourses), promiseId],
                 messageId: promiseId
             }, window.location.origin);
         });
@@ -287,22 +450,36 @@ window.shiguangBridgePromise = {
             const promiseId = generatePromiseId();
             pendingPromises.set(promiseId, { resolve, reject });
             console.log('[模拟SavePresetTimeSlots]:', { jsonString });
+
+            // 时序拦截：若已导入组合作息，禁止再调基础时间导入
+            if (isComboScheduleImported) {
+                const errMsg = "顺序拦截：已导入作息方案，禁止再调用基础时间导入以防覆盖方案状态。";
+                console.error('[时序拦截]:', errMsg);
+                pendingPromises.delete(promiseId);
+                return reject(new Error(errMsg));
+            }
+
+            let cleanedTimeSlots;
             try {
                 const timeSlots = JSON.parse(jsonString);
                 const validationError = validateAllTimeSlots(timeSlots);
                 if (validationError) {
                     throw new Error(validationError);
                 }
+
+                cleanedTimeSlots = timeSlots.map(cleanTimeSlotData);
             } catch (e) {
                 console.error('[数据验证失败]:', e.message);
                 pendingPromises.delete(promiseId);
                 return reject(e);
             }
 
+            presetTimeSlotsCache = [...cleanedTimeSlots].sort((a, b) => a.number - b.number);
+
             window.postMessage({
                 type: 'ANDROID_BRIDGE_CALL',
                 method: 'savePresetTimeSlots',
-                args: [jsonString, promiseId],
+                args: [JSON.stringify(cleanedTimeSlots), promiseId],
                 messageId: promiseId
             }, window.location.origin);
         });
@@ -328,6 +505,67 @@ window.shiguangBridgePromise = {
                 type: 'ANDROID_BRIDGE_CALL',
                 method: 'saveCourseConfig',
                 args: [cleanedJsonString, promiseId], 
+                messageId: promiseId
+            }, window.location.origin);
+        });
+    },
+
+    // 组合作息方案提交
+    saveComboSchedule: (jsonString) => {
+        return new Promise((resolve, reject) => {
+            const promiseId = generatePromiseId();
+            pendingPromises.set(promiseId, { resolve, reject });
+            console.log('[模拟SaveComboSchedule]:', { jsonString });
+
+            // 前置检查：必须先成功调用 savePresetTimeSlots
+            if (!presetTimeSlotsCache || presetTimeSlotsCache.length === 0) {
+                const errMsg = "顺序拦截：saveComboSchedule 必须在 savePresetTimeSlots 执行成功后调用！";
+                console.error('[时序拦截]:', errMsg);
+                pendingPromises.delete(promiseId);
+                return reject(new Error(errMsg));
+            }
+
+            let combo;
+            try {
+                combo = JSON.parse(jsonString);
+            } catch (e) {
+                console.error('[组合作息方案 JSON 解析失败]:', e.message);
+                pendingPromises.delete(promiseId);
+                return reject(new Error(`组合作息方案 JSON 解析失败: ${e.message}`));
+            }
+
+            // 字段校验
+            const validationError = validateComboScheduleData(combo);
+            if (validationError) {
+                console.error('[组合作息方案数据校验失败]:', validationError);
+                pendingPromises.delete(promiseId);
+                return reject(new Error(validationError));
+            }
+
+            const cleanedCombo = cleanComboScheduleData(combo);
+
+            // 差量合并：每个模板的 timeSlots 对齐到骨架
+            const mergedCombo = {
+                name: (typeof cleanedCombo.name === 'string' && cleanedCombo.name.trim() !== '')
+                    ? cleanedCombo.name
+                    : null,
+                publicSchedules: cleanedCombo.publicSchedules.map(tpl => ({
+                    name: tpl.name,
+                    startDate: tpl.startDate,
+                    endDate: tpl.endDate,
+                    defaultClassDuration: tpl.defaultClassDuration,
+                    defaultBreakDuration: tpl.defaultBreakDuration,
+                    timeSlots: mergeAndAlignTimeSlots(presetTimeSlotsCache, tpl.timeSlots || [])
+                }))
+            };
+
+            // 标记已导入组合作息，锁定后续 savePresetTimeSlots
+            isComboScheduleImported = true;
+
+            window.postMessage({
+                type: 'ANDROID_BRIDGE_CALL',
+                method: 'saveComboSchedule',
+                args: [JSON.stringify(mergedCombo), promiseId],
                 messageId: promiseId
             }, window.location.origin);
         });
