@@ -1,0 +1,4 @@
+{
+  "extends": "./.wxt/tsconfig.json",
+  "include": ["auto-imports.d.ts", "components.d.ts", "**/*.ts", "**/*.vue"]
+}

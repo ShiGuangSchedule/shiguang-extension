@@ -1,0 +1,35 @@
+{
+  "name": "shiguang-extension",
+  "description": "拾光项目的浏览器扩展",
+  "private": true,
+  "version": "2.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "dev:firefox": "wxt -b firefox",
+    "build": "wxt build",
+    "build:firefox": "wxt build -b firefox",
+    "zip": "wxt zip",
+    "zip:firefox": "wxt zip -b firefox",
+    "compile": "vue-tsc --noEmit",
+    "postinstall": "wxt prepare"
+  },
+  "dependencies": {
+    "@varlet/touch-emulator": "^3.20.10",
+    "@varlet/ui": "^3.20.10",
+    "js-yaml": "^5.5.0",
+    "vue": "^3.5.45"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@varlet/import-resolver": "^3.20.10",
+    "@wxt-dev/module-vue": "^1.0.3",
+    "typescript": "^5.9.3",
+    "unplugin-auto-import": "^21.1.0",
+    "unplugin-vue-components": "^32.1.0",
+    "vite": "^8.3.8",
+    "vue-tsc": "^3.3.14",
+    "web-ext": "^10.8.0",
+    "wxt": "^0.21.5"
+  }
+}
