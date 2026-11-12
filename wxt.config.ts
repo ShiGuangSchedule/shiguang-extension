@@ -53,7 +53,13 @@ export default defineConfig({
       host_permissions: ['<all_urls>'],
       sidebar_action: { default_panel: 'sidepanel.html' },
       browser_specific_settings: {
-        gecko: { id: 'shiguang-extension@example.com', strict_min_version: '135.0' },
+        gecko: {
+          id: 'shiguang-extension@ShiGuangSchedule',
+          strict_min_version: '153.0',
+          data_collection_permissions: {
+            required: ['none'],
+          },
+        },
       },
     };
 

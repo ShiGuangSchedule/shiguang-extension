@@ -2,7 +2,7 @@
   "name": "shiguang-extension",
   "description": "拾光项目的浏览器扩展",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.1.1",
   "type": "module",
   "scripts": {
     "dev": "wxt",
