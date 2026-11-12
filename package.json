@@ -23,6 +23,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "@varlet/import-resolver": "^3.20.10",
+    "@wxt-dev/auto-icons": "^1.1.2",
     "@wxt-dev/module-vue": "^1.0.3",
     "typescript": "^5.9.3",
     "unplugin-auto-import": "^21.1.0",

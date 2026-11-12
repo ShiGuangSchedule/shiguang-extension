@@ -6,10 +6,26 @@ import { VarletImportResolver } from '@varlet/import-resolver';
 
 // See https://wxt.dev/api/reference/wxt/interfaces/inlineconfig.html
 export default defineConfig({
-  modules: ['@wxt-dev/module-vue'],
+  modules: [
+    '@wxt-dev/module-vue',
+    '@wxt-dev/auto-icons',
+  ],
   srcDir: 'src',
+  publicDir: 'public',
+
+  autoIcons: {
+    baseIconPath: 'assets/icon.png',
+  },
+
   manifest: ({ browser }) => {
+    const i18nBase = {
+      name: '__MSG_extName__',
+      description: '__MSG_extDescription__',
+      default_locale: 'zh_CN',
+    };
+
     const chromeManifest = {
+      ...i18nBase,
       permissions: [
         'storage',
         'scripting',
@@ -25,6 +41,7 @@ export default defineConfig({
     };
 
     const firefoxManifest = {
+      ...i18nBase,
       permissions: [
         'storage',
         'scripting',
@@ -42,6 +59,7 @@ export default defineConfig({
 
     return browser === 'firefox' ? firefoxManifest : chromeManifest;
   },
+
   vite: () => ({
     plugins: [
       components({

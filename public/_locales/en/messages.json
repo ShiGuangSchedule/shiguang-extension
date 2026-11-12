@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "Shiguang Extension",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "Browser extension for the Shiguang project",
+    "description": "Extension description"
+  }
+}

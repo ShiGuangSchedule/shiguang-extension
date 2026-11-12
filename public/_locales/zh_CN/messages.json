@@ -1,0 +1,10 @@
+{
+  "extName": {
+    "message": "拾光扩展插件",
+    "description": "扩展名称"
+  },
+  "extDescription": {
+    "message": "拾光项目的浏览器扩展",
+    "description": "扩展描述"
+  }
+}
